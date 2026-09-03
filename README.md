@@ -79,6 +79,9 @@ availability.
 
 ## Tests
 
+GitHub Actions runs the offline test suite on pushes and pull requests using
+Python 3.12. CI requires no exchange credentials and never starts a trader.
+
 ```sh
 python -m unittest discover -s tests -v
 ```
