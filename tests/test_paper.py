@@ -1,4 +1,5 @@
 import base64
+import sqlite3
 import tempfile
 import unittest
 from decimal import Decimal as D
@@ -25,17 +26,36 @@ class Tests(unittest.TestCase):
         self.assertIsNone(favorite({"yes": D(".51"), "no": D(".51")}, D(".70")))
         self.assertEqual(asks({}, 1), {})
 
+    def test_asks_rejects_malformed_or_invalid_book_data(self):
+        invalid_payloads = [
+            {"orderbook_fp": {"no_dollars": [["NaN", 1]]}},
+            {"orderbook": {"no": [[101, 1]]}},
+            {"orderbook": {"no": [[50]]}},
+            {"orderbook": {"no": "not-a-level-list"}},
+            {"orderbook_fp": []},
+        ]
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValueError):
+                    asks(payload, 1)
+        with self.assertRaises(ValueError):
+            asks({}, 0)
+
     def test_fees(self):
         self.assertEqual(fee(D(".5"), 1, D(".07")), D(".02"))
+        for args in ((D("NaN"), 1, D(".07")), (D(".5"), 0, D(".07")),
+                     (D(".5"), True, D(".07")), (D(".5"), 1, D("-.01"))):
+            with self.subTest(args=args):
+                with self.assertRaises(ValueError):
+                    fee(*args)
 
     def test_restart_dedup_settlement_and_brake(self):
         with tempfile.TemporaryDirectory() as temp:
             path = str(Path(temp) / "ledger.sqlite")
-            ledger = Ledger(path)
-            args = ("A", "yes", 1, D(".60"), D(".02"), D(5), D(".50"))
-            self.assertTrue(ledger.enter(*args))
-            self.assertFalse(ledger.enter(*args))
-            ledger.db.close()
+            with Ledger(path) as ledger:
+                args = ("A", "yes", 1, D(".60"), D(".02"), D(5), D(".50"))
+                self.assertTrue(ledger.enter(*args))
+                self.assertFalse(ledger.enter(*args))
             ledger = Ledger(path)
             ledger.settle("A", "")
             self.assertIsNone(ledger.rows()[0]["result"])
@@ -43,13 +63,44 @@ class Tests(unittest.TestCase):
             ledger.settle("A", "yes")  # cannot silently rewrite a settled result
             self.assertEqual(ledger.totals(), (D(".62"), D("-.62")))
             self.assertFalse(ledger.enter("B", *args[1:]))
-            ledger.db.close()
+            ledger.close()
+            ledger.close()
 
     def test_budget(self):
         with tempfile.TemporaryDirectory() as temp:
-            ledger = Ledger(str(Path(temp) / "ledger.sqlite"))
-            self.assertFalse(ledger.enter("A", "yes", 1, D(".60"), D(".02"), D(".61"), D(3)))
-            ledger.db.close()
+            with Ledger(str(Path(temp) / "ledger.sqlite")) as ledger:
+                self.assertFalse(ledger.enter("A", "yes", 1, D(".60"), D(".02"), D(".61"), D(3)))
+
+    def test_invalid_ledger_entries_do_not_create_trades(self):
+        invalid_entries = [
+            ("", "yes", 1, D(".60"), D(".02"), D(5), D(3)),
+            ("A", "maybe", 1, D(".60"), D(".02"), D(5), D(3)),
+            ("A", "yes", True, D(".60"), D(".02"), D(5), D(3)),
+            ("A", "yes", 1, D("NaN"), D(".02"), D(5), D(3)),
+            ("A", "yes", 1, D(".60"), D("-.01"), D(5), D(3)),
+            ("A", "yes", 1, D(".60"), D(".02"), D(0), D(3)),
+            ("A", "yes", 1, D(".60"), D(".02"), D(5), D(0)),
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            with Ledger(str(Path(temp) / "ledger.sqlite")) as ledger:
+                for args in invalid_entries:
+                    with self.subTest(args=args):
+                        self.assertFalse(ledger.enter(*args))
+                self.assertEqual(ledger.rows(), [])
+
+    def test_settlement_is_atomic_when_update_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with Ledger(str(Path(temp) / "ledger.sqlite")) as ledger:
+                args = ("A", "yes", 1, D(".60"), D(".02"), D(5), D(3))
+                self.assertTrue(ledger.enter(*args))
+                ledger.db.execute("""CREATE TRIGGER reject_settlement
+                    BEFORE UPDATE OF result ON trades
+                    BEGIN SELECT RAISE(ABORT, 'reject settlement'); END""")
+                with self.assertRaisesRegex(sqlite3.IntegrityError, "reject settlement"):
+                    ledger.settle("A", "yes")
+                row = ledger.rows()[0]
+                self.assertIsNone(row["result"])
+                self.assertIsNone(row["pnl"])
 
     def test_signing(self):
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
