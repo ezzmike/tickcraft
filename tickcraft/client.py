@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 API = "https://external-api.kalshi.com/trade-api/v2"
+MAX_MARKET_PAGES = 10
 
 
 class KalshiClient:
@@ -30,6 +31,17 @@ class KalshiClient:
                       allowed_methods=["GET"])
         self.session.mount("https://", HTTPAdapter(max_retries=retry))
 
+    def close(self):
+        """Release the underlying HTTP session's pooled connections."""
+        self.session.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+        return False
+
     def _sign(self, path):
         timestamp = str(int(time.time() * 1000))
         signature = self.key.sign(
@@ -48,20 +60,41 @@ class KalshiClient:
                                     headers=self._sign(path) if self.key else {},
                                     timeout=10)
         response.raise_for_status()
-        return response.json()
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise ValueError("Kalshi API response was not valid JSON") from error
+        if not isinstance(payload, dict):
+            raise ValueError("Kalshi API response must be a JSON object")
+        return payload
 
     def markets(self, series):
         cursor = None
-        for _ in range(10):  # bounded discovery; no unbounded crawl
+        seen_cursors = set()
+        for _ in range(MAX_MARKET_PAGES):  # bounded discovery; no unbounded crawl
             payload = self.get("/markets", series_ticker=series, status="open",
                                limit=100, **({"cursor": cursor} if cursor else {}))
-            yield from payload.get("markets", [])
-            cursor = payload.get("cursor")
-            if not cursor:
+            markets = payload.get("markets")
+            if not isinstance(markets, list):
+                raise ValueError("Kalshi markets response must contain a list of markets")
+            yield from markets
+            next_cursor = payload.get("cursor")
+            if next_cursor is None or next_cursor == "":
                 return
+            if not isinstance(next_cursor, str):
+                raise ValueError("Kalshi markets response cursor must be a string")
+            if next_cursor in seen_cursors:
+                raise ValueError("Kalshi API returned a repeated pagination cursor")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+        raise ValueError(f"Kalshi markets response exceeded {MAX_MARKET_PAGES} pages")
 
     def market(self, ticker):
-        return self.get(f"/markets/{quote(ticker, safe='')}")["market"]
+        payload = self.get(f"/markets/{quote(ticker, safe='')}")
+        market = payload.get("market")
+        if not isinstance(market, dict):
+            raise ValueError("Kalshi market response must contain a market object")
+        return market
 
     def book(self, ticker):
         return self.get(f"/markets/{quote(ticker, safe='')}/orderbook", depth=10)
