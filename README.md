@@ -18,6 +18,12 @@ python -m pip install -e .
 python -m tickcraft --once
 ```
 
+See the available, paper-only options:
+
+```sh
+python -m tickcraft --help
+```
+
 Run the illustrative favorite-to-settlement paper baseline:
 
 ```sh
@@ -28,6 +34,9 @@ Stop with Ctrl+C. State lives in ignored `data/paper.sqlite`; restarting with
 the same ledger reconciles previously open paper positions and prevents
 duplicate entries. Only one process should own a ledger. Keep parameters frozen
 per experiment; use `--ledger data/new-experiment.sqlite` for a new cohort.
+
+Treat a ledger as sensitive local experiment data. Do not commit it, attach it
+to an issue, or publish it with a reproduction.
 
 ## What it does
 
@@ -85,6 +94,10 @@ Python 3.12. CI requires no exchange credentials and never starts a trader.
 ```sh
 python -m unittest discover -s tests -v
 ```
+
+For contribution and release checks, see [CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/releasing.md](docs/releasing.md). A release artifact is not evidence that
+the example strategy is profitable or suitable for live use.
 
 ## License and commercial use
 
