@@ -6,9 +6,27 @@ build-backend = "setuptools.build_meta"
 name = "tickcraft"
 version = "0.1.0"
 description = "A tiny, paper-first Kalshi strategy workbench."
+readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+keywords = ["kalshi", "paper-trading", "research", "strategy"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Office/Business :: Financial",
+]
 dependencies = ["requests>=2.31,<3", "cryptography>=42"]
+
+[project.urls]
+Source = "https://github.com/ezzmike/tickcraft"
+Issues = "https://github.com/ezzmike/tickcraft/issues"
 
 [project.scripts]
 tickcraft = "tickcraft.__main__:main"
